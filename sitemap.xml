@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://pockfume.com/</loc>
-  </url>
+  <url><loc>https://pockfume.com/</loc></url>
+  <url><loc>https://pockfume.com/night-volt.html</loc></url>
+  <url><loc>https://pockfume.com/velvet-ember.html</loc></url>
+  <url><loc>https://pockfume.com/golden-haze.html</loc></url>
+  <url><loc>https://pockfume.com/pacific-ocean-pearl.html</loc></url>
+  <url><loc>https://pockfume.com/british-tea-rose.html</loc></url>
+  <url><loc>https://pockfume.com/amber-musk.html</loc></url>
 </urlset>
