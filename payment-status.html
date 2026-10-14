@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Payment Status | POCKFUME</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: #f7f3ed;
+      color: #222;
+      font-family: Arial, sans-serif;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 440px;
+      padding: 38px 25px;
+      text-align: center;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 8px 35px rgba(0, 0, 0, 0.08);
+    }
+
+    .brand {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: 4px;
+      color: #171717;
+      margin-bottom: 10px;
+    }
+
+    .icon {
+      width: 75px;
+      height: 75px;
+      margin: 25px auto 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 38px;
+      background: #eee;
+    }
+
+    h1 {
+      font-size: 25px;
+      margin: 12px 0;
+    }
+
+    p {
+      color: #666;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .order {
+      margin: 22px 0;
+      padding: 12px;
+      background: #f7f7f7;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+
+    .button {
+      display: block;
+      width: 100%;
+      margin-top: 15px;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      background: #171717;
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .secondary {
+      background: #eee;
+      color: #222;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .note {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #888;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <div class="brand">POCKFUME</div>
+    <p>Small size. Lasting impression.</p>
+
+    <div class="icon" id="statusIcon">⏳</div>
+
+    <h1 id="statusTitle">Checking your payment...</h1>
+
+    <p id="statusMessage">
+      Please wait while we confirm your payment securely.
+    </p>
+
+    <div class="order">
+      <strong>Order ID:</strong>
+      <div id="orderId">Loading...</div>
+    </div>
+
+    <button
+      class="button hidden"
+      id="retryButton"
+      onclick="checkPayment()">
+      Check Payment Again
+    </button>
+
+    <a
+      class="button hidden"
+      id="homeButton"
+      href="/">
+      Return to POCKFUME
+    </a>
+
+    <a
+      class="button secondary"
+      id="whatsappButton"
+      href="https://wa.me/91YOURNUMBER"
+      target="_blank"
+      rel="noopener"
+    >
+      Contact Us on WhatsApp
+    </a>
+
+    <div class="note">
+      Please keep your order ID for future reference.
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get("order_id");
+
+    const icon = document.getElementById("statusIcon");
+    const title = document.getElementById("statusTitle");
+    const message = document.getElementById("statusMessage");
+    const orderElement = document.getElementById("orderId");
+    const retryButton = document.getElementById("retryButton");
+    const homeButton = document.getElementById("homeButton");
+
+    orderElement.textContent = orderId || "Not available";
+
+    function showStatus(symbol, heading, description) {
+      icon.textContent = symbol;
+      title.textContent = heading;
+      message.textContent = description;
+    }
+
+    async function checkPayment() {
+      if (!orderId) {
+        showStatus(
+          "⚠️",
+          "Order ID Missing",
+          "We could not find your order ID. Please contact us for assistance."
+        );
+        retryButton.classList.add("hidden");
+        homeButton.classList.remove("hidden");
+        return;
+      }
+
+      retryButton.classList.add("hidden");
+
+      showStatus(
+        "⏳",
+        "Checking Your Payment",
+        "Please wait while we verify your order with Cashfree."
+      );
+
+      try {
+        const response = await fetch(
+          "/api/verify-order?order_id=" + encodeURIComponent(orderId)
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.message || result.error || "Unable to verify payment."
+          );
+        }
+
+        if (result.paid === true || result.orderStatus === "PAID") {
+          showStatus(
+            "✅",
+            "Payment Successful!",
+            "Thank you for shopping with POCKFUME. Your payment has been confirmed."
+          );
+          homeButton.textContent = "Continue Shopping";
+          homeButton.classList.remove("hidden");
+        } else {
+          showStatus(
+            "⌛",
+            "Payment Not Confirmed Yet",
+            "Your payment may still be processing. If money was deducted, please wait and check again."
+          );
+          retryButton.classList.remove("hidden");
+          homeButton.classList.remove("hidden");
+        }
+      } catch (error) {
+        showStatus(
+          "⚠️",
+          "Unable to Confirm Payment",
+          "We could not verify your payment right now. Please try again shortly."
+        );
+
+        retryButton.classList.remove("hidden");
+        homeButton.classList.remove("hidden");
+      }
+    }
+
+    checkPayment();
+  </script>
+
+</body>
+</html>
