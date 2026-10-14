@@ -8,6 +8,60 @@ const PRODUCTS = {
   "British Tea Rose": 249
 };
 
+function cashfreeRequest(path, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+
+    const request = https.request(
+      {
+        hostname: "api.cashfree.com",
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "x-api-version": "2025-01-01",
+          "x-client-id": process.env.CASHFREE_APP_ID,
+          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+          "Content-Length": Buffer.byteLength(body)
+        }
+      },
+      response => {
+        let data = "";
+
+        response.on("data", chunk => {
+          data += chunk;
+        });
+
+        response.on("end", () => {
+          let result;
+
+          try {
+            result = JSON.parse(data);
+          } catch {
+            return reject(new Error("Invalid Cashfree response"));
+          }
+
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            console.error("Cashfree error:", response.statusCode, result);
+            return reject(new Error("Cashfree order creation failed"));
+          }
+
+          resolve(result);
+        });
+      }
+    );
+
+    request.setTimeout(15000, () => {
+      request.destroy(new Error("Cashfree request timed out"));
+    });
+
+    request.on("error", reject);
+    request.write(body);
+    request.end();
+  });
+}
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -15,14 +69,12 @@ module.exports = async (req, res) => {
     });
   }
 
-  const appId = process.env.CASHFREE_APP_ID;
-  const secretKey = process.env.CASHFREE_SECRET_KEY;
-
-  if (!appId || !secretKey) {
-    console.error("Cashfree credentials are missing");
-
+  if (
+    !process.env.CASHFREE_APP_ID ||
+    !process.env.CASHFREE_SECRET_KEY
+  ) {
     return res.status(500).json({
-      error: "Payment configuration is incomplete"
+      error: "Cashfree credentials are missing"
     });
   }
 
@@ -38,7 +90,7 @@ module.exports = async (req, res) => {
     name.length > 100 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     !/^[6-9]\d{9}$/.test(phone) ||
-    items.length < 1 ||
+    items.length === 0 ||
     items.length > 20
   ) {
     return res.status(400).json({
@@ -60,7 +112,7 @@ module.exports = async (req, res) => {
       qty > 99
     ) {
       return res.status(400).json({
-        error: "Invalid product or quantity in cart"
+        error: "Invalid product or quantity"
       });
     }
 
@@ -70,7 +122,7 @@ module.exports = async (req, res) => {
 
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
     return res.status(400).json({
-      error: "Invalid order total"
+      error: "Invalid order amount"
     });
   }
 
@@ -80,7 +132,7 @@ module.exports = async (req, res) => {
     "_" +
     Math.random().toString(36).slice(2, 8);
 
-  const payload = JSON.stringify({
+  const payload = {
     order_id: orderId,
     order_amount: Number(amount.toFixed(2)),
     order_currency: "INR",
@@ -98,75 +150,10 @@ module.exports = async (req, res) => {
       return_url:
         "https://pockfume.com/payment-status.html?order_id={order_id}"
     }
-  });
-
-  const options = {
-    hostname: "api.cashfree.com",
-    path: "/pg/orders",
-    method: "POST",
-
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "x-api-version": "2025-01-01",
-      "x-client-id": appId,
-      "x-client-secret": secretKey,
-      "x-idempotency-key": orderId
-    }
   };
 
   try {
-    const result = await new Promise((resolve, reject) => {
-      const request = https.request(options, response => {
-        let data = "";
-
-        response.on("data", chunk => {
-          data += chunk;
-        });
-
-        response.on("end", () => {
-          let parsed;
-
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            return reject(
-              new Error("Invalid response from Cashfree")
-            );
-          }
-
-          if (
-            response.statusCode < 200 ||
-            response.statusCode >= 300
-          ) {
-            console.error(
-              "Cashfree API error:",
-              response.statusCode,
-              JSON.stringify(parsed)
-            );
-
-            return reject(
-              new Error(
-                "Cashfree rejected request: HTTP " +
-                response.statusCode
-              )
-            );
-          }
-
-          resolve(parsed);
-        });
-      });
-
-      request.setTimeout(15000, () => {
-        request.destroy(
-          new Error("Cashfree request timed out")
-        );
-      });
-
-      request.on("error", reject);
-      request.write(payload);
-      request.end();
-    });
+    const result = await cashfreeRequest("/pg/orders", payload);
 
     if (!result.payment_session_id) {
       return res.status(502).json({
@@ -181,10 +168,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(
-      "Cashfree order creation failed:",
-      error.message
-    );
+    console.error("Create order failed:", error.message);
 
     return res.status(502).json({
       error: "Unable to create payment. Please try again."
