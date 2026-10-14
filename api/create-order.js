@@ -1,19 +1,17 @@
 const https = require("https");
 
 module.exports = async (req, res) => {
-  // Allow only POST requests
   if (req.method !== "POST") {
     return res.status(405).json({
       error: "Method not allowed"
     });
   }
 
-  // Read LIVE Cashfree credentials from Vercel
   const appId = process.env.CASHFREE_APP_ID;
   const secretKey = process.env.CASHFREE_SECRET_KEY;
 
   if (!appId || !secretKey) {
-    console.error("Cashfree Production credentials are missing");
+    console.error("Cashfree credentials are missing");
 
     return res.status(500).json({
       error: "Payment configuration is incomplete"
@@ -32,7 +30,6 @@ module.exports = async (req, res) => {
   const email = String(customerEmail || "").trim();
   const phone = String(customerPhone || "").replace(/\D/g, "");
 
-  // Validate customer information
   if (
     !Number.isFinite(orderAmount) ||
     orderAmount <= 0 ||
@@ -47,9 +44,10 @@ module.exports = async (req, res) => {
     });
   }
 
-  // Generate a unique order ID
   const orderId =
-    "pockfume_" + Date.now() + "_" +
+    "pockfume_" +
+    Date.now() +
+    "_" +
     Math.random().toString(36).slice(2, 8);
 
   const payload = JSON.stringify({
@@ -70,7 +68,6 @@ module.exports = async (req, res) => {
     }
   });
 
-  // LIVE Cashfree API endpoint
   const options = {
     hostname: "api.cashfree.com",
     path: "/pg/orders",
@@ -110,7 +107,6 @@ module.exports = async (req, res) => {
             response.statusCode < 200 ||
             response.statusCode >= 300
           ) {
-            // Log the error without exposing credentials
             console.error(
               "Cashfree API error:",
               response.statusCode,
@@ -119,7 +115,7 @@ module.exports = async (req, res) => {
 
             return reject(
               new Error(
-                "Cashfree API rejected the request with status " +
+                "Cashfree API rejected request: HTTP " +
                 response.statusCode
               )
             );
@@ -130,7 +126,9 @@ module.exports = async (req, res) => {
       });
 
       request.setTimeout(15000, () => {
-        request.destroy(new Error("Cashfree request timed out"));
+        request.destroy(
+          new Error("Cashfree request timed out")
+        );
       });
 
       request.on("error", reject);
@@ -140,7 +138,7 @@ module.exports = async (req, res) => {
     });
 
     if (!result.payment_session_id) {
-      console.error("Cashfree did not return a payment session");
+      console.error("Cashfree returned no payment session");
 
       return res.status(502).json({
         error: "Unable to initialize payment"
