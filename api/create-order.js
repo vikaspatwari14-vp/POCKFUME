@@ -1,18 +1,22 @@
 const https = require("https");
 
 module.exports = async (req, res) => {
+  // Allow only POST requests
   if (req.method !== "POST") {
     return res.status(405).json({
       error: "Method not allowed"
     });
   }
 
+  // Read LIVE Cashfree credentials from Vercel
   const appId = process.env.CASHFREE_APP_ID;
   const secretKey = process.env.CASHFREE_SECRET_KEY;
 
   if (!appId || !secretKey) {
+    console.error("Cashfree Production credentials are missing");
+
     return res.status(500).json({
-      error: "Cashfree credentials are not configured"
+      error: "Payment configuration is incomplete"
     });
   }
 
@@ -24,43 +28,54 @@ module.exports = async (req, res) => {
   } = req.body || {};
 
   const orderAmount = Number(amount);
+  const name = String(customerName || "").trim();
+  const email = String(customerEmail || "").trim();
   const phone = String(customerPhone || "").replace(/\D/g, "");
 
+  // Validate customer information
   if (
     !Number.isFinite(orderAmount) ||
     orderAmount <= 0 ||
     orderAmount > 1000000 ||
-    !customerName ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customerEmail || "")) ||
+    !name ||
+    name.length > 100 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     !/^[6-9]\d{9}$/.test(phone)
   ) {
     return res.status(400).json({
-      error: "Please enter valid name, email, phone and amount"
+      error: "Please enter valid customer details and amount"
     });
   }
 
-  const orderId = "pockfume_" + Date.now();
+  // Generate a unique order ID
+  const orderId =
+    "pockfume_" + Date.now() + "_" +
+    Math.random().toString(36).slice(2, 8);
 
   const payload = JSON.stringify({
     order_id: orderId,
     order_amount: Number(orderAmount.toFixed(2)),
     order_currency: "INR",
+
     customer_details: {
       customer_id: "customer_" + Date.now(),
-      customer_name: String(customerName).trim().slice(0, 100),
-      customer_email: String(customerEmail).trim(),
+      customer_name: name,
+      customer_email: email,
       customer_phone: phone
     },
+
     order_meta: {
       return_url:
         "https://pockfume.com/payment-status?order_id={order_id}"
     }
   });
 
+  // LIVE Cashfree API endpoint
   const options = {
-    hostname: "sandbox.cashfree.com",
+    hostname: "api.cashfree.com",
     path: "/pg/orders",
     method: "POST",
+
     headers: {
       "Content-Type": "application/json",
       "Accept": "application/json",
@@ -91,16 +106,22 @@ module.exports = async (req, res) => {
             );
           }
 
-          if (response.statusCode < 200 ||
-              response.statusCode >= 300) {
+          if (
+            response.statusCode < 200 ||
+            response.statusCode >= 300
+          ) {
+            // Log the error without exposing credentials
             console.error(
-              "Cashfree error:",
+              "Cashfree API error:",
               response.statusCode,
               JSON.stringify(parsed)
             );
 
             return reject(
-              new Error("Cashfree rejected the order request")
+              new Error(
+                "Cashfree API rejected the request with status " +
+                response.statusCode
+              )
             );
           }
 
@@ -108,14 +129,21 @@ module.exports = async (req, res) => {
         });
       });
 
+      request.setTimeout(15000, () => {
+        request.destroy(new Error("Cashfree request timed out"));
+      });
+
       request.on("error", reject);
+
       request.write(payload);
       request.end();
     });
 
     if (!result.payment_session_id) {
+      console.error("Cashfree did not return a payment session");
+
       return res.status(502).json({
-        error: "Cashfree did not return a payment session"
+        error: "Unable to initialize payment"
       });
     }
 
@@ -125,7 +153,10 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Cashfree order creation failed:", error.message);
+    console.error(
+      "Cashfree order creation failed:",
+      error.message
+    );
 
     return res.status(502).json({
       error: "Unable to create payment. Please try again."
