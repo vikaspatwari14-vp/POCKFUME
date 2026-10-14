@@ -1,5 +1,13 @@
 const https = require("https");
 
+const PRODUCTS = {
+  "Night Volt": 249,
+  "Velvet Ember": 249,
+  "Golden Haze": 249,
+  "Pacific Ocean Pearl": 249,
+  "British Tea Rose": 249
+};
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -18,29 +26,51 @@ module.exports = async (req, res) => {
     });
   }
 
-  const {
-    amount,
-    customerName,
-    customerEmail,
-    customerPhone
-  } = req.body || {};
+  const body = req.body || {};
 
-  const orderAmount = Number(amount);
-  const name = String(customerName || "").trim();
-  const email = String(customerEmail || "").trim();
-  const phone = String(customerPhone || "").replace(/\D/g, "");
+  const name = String(body.customerName || "").trim();
+  const email = String(body.customerEmail || "").trim();
+  const phone = String(body.customerPhone || "").replace(/\D/g, "");
+  const items = Array.isArray(body.items) ? body.items : [];
 
   if (
-    !Number.isFinite(orderAmount) ||
-    orderAmount <= 0 ||
-    orderAmount > 1000000 ||
     !name ||
     name.length > 100 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-    !/^[6-9]\d{9}$/.test(phone)
+    !/^[6-9]\d{9}$/.test(phone) ||
+    items.length < 1 ||
+    items.length > 20
   ) {
     return res.status(400).json({
-      error: "Please enter valid customer details and amount"
+      error: "Please enter valid customer details and cart items"
+    });
+  }
+
+  let amount = 0;
+  const orderLines = [];
+
+  for (const item of items) {
+    const productName = String(item.name || "");
+    const qty = Number(item.qty);
+
+    if (
+      !Object.prototype.hasOwnProperty.call(PRODUCTS, productName) ||
+      !Number.isInteger(qty) ||
+      qty < 1 ||
+      qty > 99
+    ) {
+      return res.status(400).json({
+        error: "Invalid product or quantity in cart"
+      });
+    }
+
+    amount += PRODUCTS[productName] * qty;
+    orderLines.push(productName + " x" + qty);
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+    return res.status(400).json({
+      error: "Invalid order total"
     });
   }
 
@@ -52,7 +82,7 @@ module.exports = async (req, res) => {
 
   const payload = JSON.stringify({
     order_id: orderId,
-    order_amount: Number(orderAmount.toFixed(2)),
+    order_amount: Number(amount.toFixed(2)),
     order_currency: "INR",
 
     customer_details: {
@@ -62,9 +92,11 @@ module.exports = async (req, res) => {
       customer_phone: phone
     },
 
+    order_note: "POCKFUME: " + orderLines.join(", "),
+
     order_meta: {
       return_url:
-        "https://pockfume.com/payment-status?order_id={order_id}"
+        "https://pockfume.com/payment-status.html?order_id={order_id}"
     }
   });
 
@@ -85,10 +117,10 @@ module.exports = async (req, res) => {
 
   try {
     const result = await new Promise((resolve, reject) => {
-      const request = https.request(options, (response) => {
+      const request = https.request(options, response => {
         let data = "";
 
-        response.on("data", (chunk) => {
+        response.on("data", chunk => {
           data += chunk;
         });
 
@@ -99,7 +131,7 @@ module.exports = async (req, res) => {
             parsed = JSON.parse(data);
           } catch {
             return reject(
-              new Error("Invalid response received from Cashfree")
+              new Error("Invalid response from Cashfree")
             );
           }
 
@@ -115,7 +147,7 @@ module.exports = async (req, res) => {
 
             return reject(
               new Error(
-                "Cashfree API rejected request: HTTP " +
+                "Cashfree rejected request: HTTP " +
                 response.statusCode
               )
             );
@@ -132,22 +164,20 @@ module.exports = async (req, res) => {
       });
 
       request.on("error", reject);
-
       request.write(payload);
       request.end();
     });
 
     if (!result.payment_session_id) {
-      console.error("Cashfree returned no payment session");
-
       return res.status(502).json({
-        error: "Unable to initialize payment"
+        error: "Cashfree did not return a payment session"
       });
     }
 
     return res.status(200).json({
       orderId: result.order_id,
-      paymentSessionId: result.payment_session_id
+      paymentSessionId: result.payment_session_id,
+      amount: Number(amount.toFixed(2))
     });
 
   } catch (error) {
