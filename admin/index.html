@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+
+<title>POCKFUME | Admin Dashboard</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f6fa;
+  font-family: Arial, sans-serif;
+  color: #202436;
+}
+
+header {
+  background: #111827;
+  color: white;
+  padding: 22px;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0;
+  letter-spacing: 3px;
+}
+
+header p {
+  color: #cbd5e1;
+  margin-bottom: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: auto;
+  padding: 20px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 15px;
+}
+
+.card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px #0000000a;
+}
+
+.card h3 {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 0;
+}
+
+.card h2 {
+  font-size: 26px;
+  margin-bottom: 0;
+}
+
+section {
+  background: white;
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 750px;
+}
+
+th, td {
+  padding: 13px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  font-size: 13px;
+}
+
+th {
+  background: #f1f5f9;
+}
+
+button {
+  background: #111827;
+  color: white;
+  border: none;
+  padding: 11px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #334155;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+input {
+  padding: 11px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.status {
+  font-size: 13px;
+  color: #64748b;
+  margin: 15px 0;
+}
+
+.chart {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  height: 180px;
+  border-bottom: 1px solid #ddd;
+  padding-top: 20px;
+}
+
+.bar {
+  background: #111827;
+  flex: 1;
+  min-width: 25px;
+  border-radius: 5px 5px 0 0;
+}
+
+.empty {
+  text-align: center;
+  color: #64748b;
+  padding: 25px;
+}
+
+footer {
+  text-align: center;
+  padding: 25px;
+  color: #64748b;
+  font-size: 12px;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>POCKFUME</h1>
+  <p>Private Order Management Dashboard</p>
+</header>
+
+<div class="container">
+
+  <div class="cards">
+
+    <div class="card">
+      <h3>Total Orders</h3>
+      <h2 id="totalOrders">0</h2>
+    </div>
+
+    <div class="card">
+      <h3>Total Sales</h3>
+      <h2 id="totalSales">₹0</h2>
+    </div>
+
+    <div class="card">
+      <h3>Paid Orders</h3>
+      <h2 id="paidOrders">0</h2>
+    </div>
+
+    <div class="card">
+      <h3>Pending Dispatch</h3>
+      <h2 id="pendingDispatch">0</h2>
+    </div>
+
+  </div>
+
+  <section>
+    <h2>📦 All Orders</h2>
+
+    <div class="actions">
+      <input
+        id="search"
+        placeholder="Search orders or customers"
+        oninput="renderOrders()"
+      >
+
+      <button onclick="loadOrders()">
+        Refresh
+      </button>
+
+      <button onclick="exportExcel()">
+        Export to Excel
+      </button>
+    </div>
+
+    <p id="message" class="status">
+      Loading orders...
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Order ID</th>
+          <th>Date</th>
+          <th>Customer</th>
+          <th>Mobile</th>
+          <th>Address</th>
+          <th>Product</th>
+          <th>Qty</th>
+          <th>Amount</th>
+          <th>Payment</th>
+          <th>Delivery</th>
+        </tr>
+      </thead>
+
+      <tbody id="ordersTable"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>📊 Sales Analytics</h2>
+    <p class="status">
+      Revenue from verified paid orders
+    </p>
+    <div id="salesChart" class="chart"></div>
+    <p id="chartLabels" class="status"></p>
+  </section>
+
+  <section>
+    <h2>🛍️ Product-wise Sales Report</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Quantity Sold</th>
+          <th>Sales Value</th>
+        </tr>
+      </thead>
+      <tbody id="productTable"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>👤 Customer Order History</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Mobile</th>
+          <th>Total Orders</th>
+          <th>Total Spent</th>
+        </tr>
+      </thead>
+      <tbody id="customerTable"></tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  © POCKFUME — Private Admin System
+</footer>
+
+<script>
+
+let orders = [];
+
+const money = value =>
+  "₹" + Number(value || 0).toLocaleString("en-IN");
+
+const safe = value =>
+  String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+
+function isPaid(order) {
+  return String(order.payment_status || "")
+    .toUpperCase() === "PAID";
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? "-"
+    : date.toLocaleDateString("en-IN");
+}
+
+async function loadOrders() {
+
+  const message = document.getElementById("message");
+
+  message.textContent = "Loading orders...";
+
+  try {
+
+    const response = await fetch("/api/admin/orders", {
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+
+    if (response.status === 401 ||
+        response.status === 403) {
+      throw new Error(
+        "Admin login required. Secure login is not connected yet."
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        "Order database is not connected yet."
+      );
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data.orders)) {
+      throw new Error("Invalid order data.");
+    }
+
+    orders = data.orders;
+
+    message.textContent =
+      orders.length + " orders loaded.";
+
+    renderAll();
+
+  } catch (error) {
+
+    orders = [];
+    renderAll();
+
+    message.textContent = error.message;
+  }
+}
+
+function renderAll() {
+  renderSummary();
+  renderOrders();
+  renderProducts();
+  renderCustomers();
+  renderChart();
+}
+
+function renderSummary() {
+
+  const paid = orders.filter(isPaid);
+
+  const revenue = paid.reduce(
+    (sum, order) =>
+      sum + Number(order.amount || 0),
+    0
+  );
+
+  const pending = paid.filter(order =>
+    !["SHIPPED", "DELIVERED"].includes(
+      String(order.delivery_status || "")
+        .toUpperCase()
+    )
+  );
+
+  document.getElementById("totalOrders").textContent =
+    orders.length;
+
+  document.getElementById("totalSales").textContent =
+    money(revenue);
+
+  document.getElementById("paidOrders").textContent =
+    paid.length;
+
+  document.getElementById("pendingDispatch").textContent =
+    pending.length;
+}
+
+function renderOrders() {
+
+  const search = document.getElementById("search")
+    .value.toLowerCase();
+
+  const filtered = orders.filter(order =>
+    JSON.stringify(order).toLowerCase()
+      .includes(search)
+  );
+
+  const tbody = document.getElementById("ordersTable");
+
+  if (!filtered.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="10" class="empty">No orders found</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(order => {
+
+    const address = order.address || "";
+
+    return `
+      <tr>
+        <td>${safe(order.order_id)}</td>
+        <td>${safe(formatDate(order.created_at))}</td>
+        <td>${safe(order.customer_name)}</td>
+        <td>${safe(order.customer_phone)}</td>
+        <td>${safe(address)}</td>
+        <td>${safe(order.product)}</td>
+        <td>${safe(order.quantity)}</td>
+        <td>${money(order.amount)}</td>
+        <td>${safe(order.payment_status)}</td>
+        <td>${safe(order.delivery_status)}</td>
+      </tr>
+    `;
+
+  }).join("");
+}
+
+function renderProducts() {
+
+  const products = {};
+
+  orders.filter(isPaid).forEach(order => {
+
+    const name = order.product || "Unknown";
+
+    if (!products[name]) {
+      products[name] = {
+        qty: 0,
+        sales: 0
+      };
+    }
+
+    products[name].qty += Number(order.quantity || 0);
+    products[name].sales += Number(order.amount || 0);
+  });
+
+  const tbody = document.getElementById("productTable");
+
+  tbody.innerHTML =
+    Object.entries(products).map(([name, data]) => `
+      <tr>
+        <td>${safe(name)}</td>
+        <td>${data.qty}</td>
+        <td>${money(data.sales)}</td>
+      </tr>
+    `).join("") ||
+    '<tr><td colspan="3" class="empty">No sales yet</td></tr>';
+}
+
+function renderCustomers() {
+
+  const customers = {};
+
+  orders.filter(isPaid).forEach(order => {
+
+    const phone = order.customer_phone || "Unknown";
+
+    if (!customers[phone]) {
+      customers[phone] = {
+        name: order.customer_name,
+        count: 0,
+        total: 0
+      };
+    }
+
+    customers[phone].count++;
+    customers[phone].total += Number(order.amount || 0);
+  });
+
+  const tbody = document.getElementById("customerTable");
+
+  tbody.innerHTML =
+    Object.entries(customers).map(([phone, data]) => `
+      <tr>
+        <td>${safe(data.name)}</td>
+        <td>${safe(phone)}</td>
+        <td>${data.count}</td>
+        <td>${money(data.total)}</td>
+      </tr>
+    `).join("") ||
+    '<tr><td colspan="4" class="empty">No customers yet</td></tr>';
+}
+
+function renderChart() {
+
+  const daily = {};
+
+  orders.filter(isPaid).forEach(order => {
+
+    if (!order.created_at) return;
+
+    const date = formatDate(order.created_at);
+
+    daily[date] =
+      (daily[date] || 0) + Number(order.amount || 0);
+  });
+
+  const entries = Object.entries(daily).slice(-7);
+
+  const chart = document.getElementById("salesChart");
+  const labels = document.getElementById("chartLabels");
+
+  if (!entries.length) {
+    chart.innerHTML =
+      '<p class="empty">No paid sales to display</p>';
+    labels.textContent = "";
+    return;
+  }
+
+  const max = Math.max(...entries.map(x => x[1]), 1);
+
+  chart.innerHTML = entries.map(([date, amount]) => `
+    <div
+      class="bar"
+      title="${safe(date)}: ${money(amount)}"
+      style="height:${Math.max(3, amount / max * 100)}%">
+    </div>
+  `).join("");
+
+  labels.textContent =
+    entries.map(([date]) => date).join("  |  ");
+}
+
+function csvCell(value) {
+
+  let text = String(value ?? "");
+
+  // Prevent spreadsheet formula injection.
+  if (/^[\s]*[=+\-@]/.test(text)) {
+    text = "'" + text;
+  }
+
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function exportExcel() {
+
+  if (!orders.length) {
+    alert("No orders available to export.");
+    return;
+  }
+
+  const headings = [
+    "Order ID",
+    "Date",
+    "Customer",
+    "Mobile",
+    "Address",
+    "Product",
+    "Quantity",
+    "Amount",
+    "Payment Status",
+    "Delivery Status"
+  ];
+
+  const rows = orders.map(order => [
+    order.order_id,
+    order.created_at,
+    order.customer_name,
+    order.customer_phone,
+    order.address,
+    order.product,
+    order.quantity,
+    order.amount,
+    order.payment_status,
+    order.delivery_status
+  ]);
+
+  const csv = [headings, ...rows]
+    .map(row => row.map(csvCell).join(","))
+    .join("\r\n");
+
+  const blob = new Blob(
+    ["\uFEFF", csv],
+    { type: "text/csv;charset=utf-8;" }
+  );
+
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "POCKFUME_Orders.csv";
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
+loadOrders();
+
+</script>
+
+</body>
+</html>
