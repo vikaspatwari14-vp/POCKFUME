@@ -1,6 +1,6 @@
-const https = require("https");
+// POCKFUME — Cashfree LIVE Order Creation API
 
-const PRODUCTS = {
+const PRODUCT_PRICES = {
   "Night Volt": 249,
   "Velvet Ember": 249,
   "Golden Haze": 249,
@@ -8,170 +8,268 @@ const PRODUCTS = {
   "British Tea Rose": 249
 };
 
-function cashfreeRequest(path, payload) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify(payload);
+const COMBO_PRICES = {
+  "Pick Any 2 Combo": { price: 349, count: 2 },
+  "Pick Any 4 Combo": { price: 599, count: 4 }
+};
 
-    const request = https.request(
-      {
-        hostname: "api.cashfree.com",
-        path,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "x-api-version": "2025-01-01",
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "Content-Length": Buffer.byteLength(body)
-        }
-      },
-      response => {
-        let data = "";
-
-        response.on("data", chunk => {
-          data += chunk;
-        });
-
-        response.on("end", () => {
-          let result;
-
-          try {
-            result = JSON.parse(data);
-          } catch {
-            return reject(new Error("Invalid Cashfree response"));
-          }
-
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            console.error("Cashfree error:", response.statusCode, result);
-            return reject(new Error("Cashfree order creation failed"));
-          }
-
-          resolve(result);
-        });
-      }
-    );
-
-    request.setTimeout(15000, () => {
-      request.destroy(new Error("Cashfree request timed out"));
-    });
-
-    request.on("error", reject);
-    request.write(body);
-    request.end();
-  });
+function clean(value, maxLength = 100) {
+  return String(value || "")
+    .trim()
+    .replace(/[<>\u0000-\u001F]/g, "")
+    .slice(0, maxLength);
 }
 
-module.exports = async (req, res) => {
+module.exports = async function handler(req, res) {
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
+
   if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
     return res.status(405).json({
-      error: "Method not allowed"
+      error: "Method not allowed."
     });
   }
 
-  if (
-    !process.env.CASHFREE_APP_ID ||
-    !process.env.CASHFREE_SECRET_KEY
-  ) {
+  const appId = process.env.CASHFREE_APP_ID;
+  const secretKey = process.env.CASHFREE_SECRET_KEY;
+
+  if (!appId || !secretKey) {
     return res.status(500).json({
-      error: "Cashfree credentials are missing"
+      error: "Payment service is not configured."
     });
   }
 
-  const body = req.body || {};
+  try {
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body)
+        : req.body || {};
 
-  const name = String(body.customerName || "").trim();
-  const email = String(body.customerEmail || "").trim();
-  const phone = String(body.customerPhone || "").replace(/\D/g, "");
-  const items = Array.isArray(body.items) ? body.items : [];
+    // CUSTOMER DETAILS
+    const customerName = clean(body.customerName, 100);
+    const customerEmail = clean(body.customerEmail, 150);
+    const customerPhone = clean(body.customerPhone, 10);
 
-  if (
-    !name ||
-    name.length > 100 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-    !/^[6-9]\d{9}$/.test(phone) ||
-    items.length === 0 ||
-    items.length > 20
-  ) {
-    return res.status(400).json({
-      error: "Please enter valid customer details and cart items"
-    });
-  }
+    // DELIVERY ADDRESS
+    const address = body.address || {};
 
-  let amount = 0;
-  const orderLines = [];
-
-  for (const item of items) {
-    const productName = String(item.name || "");
-    const qty = Number(item.qty);
+    const address1 = clean(address.line1, 100);
+    const address2 = clean(address.line2, 100);
+    const landmark = clean(address.landmark, 80);
+    const city = clean(address.city, 60);
+    const state = clean(address.state, 60);
+    const pincode = clean(address.pincode, 6);
 
     if (
-      !Object.prototype.hasOwnProperty.call(PRODUCTS, productName) ||
-      !Number.isInteger(qty) ||
-      qty < 1 ||
-      qty > 99
+      !customerName ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) ||
+      !/^[6-9]\d{9}$/.test(customerPhone)
     ) {
       return res.status(400).json({
-        error: "Invalid product or quantity"
+        error:
+          "Please enter a valid name, email and 10-digit Indian mobile number."
       });
     }
 
-    amount += PRODUCTS[productName] * qty;
-    orderLines.push(productName + " x" + qty);
-  }
-
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
-    return res.status(400).json({
-      error: "Invalid order amount"
-    });
-  }
-
-  const orderId =
-    "pockfume_" +
-    Date.now() +
-    "_" +
-    Math.random().toString(36).slice(2, 8);
-
-  const payload = {
-    order_id: orderId,
-    order_amount: Number(amount.toFixed(2)),
-    order_currency: "INR",
-
-    customer_details: {
-      customer_id: "customer_" + Date.now(),
-      customer_name: name,
-      customer_email: email,
-      customer_phone: phone
-    },
-
-    order_note: "POCKFUME: " + orderLines.join(", "),
-
-    order_meta: {
-      return_url:
-        "https://pockfume.com/payment-status.html?order_id={order_id}"
+    if (
+      !address1 ||
+      !address2 ||
+      !city ||
+      !state ||
+      !/^\d{6}$/.test(pincode)
+    ) {
+      return res.status(400).json({
+        error:
+          "Please enter your complete delivery address and a valid 6-digit PIN code."
+      });
     }
-  };
 
-  try {
-    const result = await cashfreeRequest("/pg/orders", payload);
+    // VALIDATE CART
+    const items = Array.isArray(body.items) ? body.items : [];
 
-    if (!result.payment_session_id) {
+    if (!items.length || items.length > 20) {
+      return res.status(400).json({
+        error: "Your cart is empty or contains too many items."
+      });
+    }
+
+    let total = 0;
+    const orderLines = [];
+    const choicesForTags = [];
+
+    for (const item of items) {
+      const name = clean(item.name, 60);
+      const qty = Number(item.qty);
+
+      if (!Number.isInteger(qty) || qty < 1 || qty > 99) {
+        return res.status(400).json({
+          error: "Invalid product quantity."
+        });
+      }
+
+      // INDIVIDUAL PERFUMES
+      if (
+        Object.prototype.hasOwnProperty.call(
+          PRODUCT_PRICES,
+          name
+        )
+      ) {
+        total += PRODUCT_PRICES[name] * qty;
+        orderLines.push(`${name} x${qty}`);
+        continue;
+      }
+
+      // COMBO OFFERS
+      if (
+        Object.prototype.hasOwnProperty.call(
+          COMBO_PRICES,
+          name
+        )
+      ) {
+        const combo = COMBO_PRICES[name];
+
+        const choices = Array.isArray(item.choices)
+          ? item.choices.map(x => clean(x, 60))
+          : [];
+
+        const uniqueChoices = [...new Set(choices)];
+
+        if (
+          uniqueChoices.length !== combo.count ||
+          uniqueChoices.some(
+            x =>
+              !Object.prototype.hasOwnProperty.call(
+                PRODUCT_PRICES,
+                x
+              )
+          )
+        ) {
+          return res.status(400).json({
+            error:
+              `Please choose exactly ${combo.count} different fragrances for ${name}.`
+          });
+        }
+
+        total += combo.price * qty;
+
+        orderLines.push(
+          `${name} (${uniqueChoices.join(", ")}) x${qty}`
+        );
+
+        choicesForTags.push(
+          `${name}: ${uniqueChoices.join(", ")}`
+        );
+
+        continue;
+      }
+
+      return res.status(400).json({
+        error:
+          `We could not validate product "${name}". Please refresh your cart and try again.`
+      });
+    }
+
+    if (
+      !Number.isFinite(total) ||
+      total < 1 ||
+      total > 100000
+    ) {
+      return res.status(400).json({
+        error: "Invalid order total."
+      });
+    }
+
+    // CREATE UNIQUE ORDER ID
+    const orderId =
+      `pockfume_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 9)}`;
+
+    const orderNote = orderLines.join("; ").slice(0, 240);
+
+    // ADDRESS AND ITEM DETAILS
+    const tags = {
+      addr1: address1,
+      addr2: address2,
+      landmark: landmark || "Not provided",
+      city: city,
+      state: state,
+      pincode: pincode,
+      items: [...orderLines, ...choicesForTags]
+        .join("; ")
+        .slice(0, 250)
+    };
+
+    // CREATE CASHFREE LIVE PAYMENT ORDER
+    const cashfreeResponse = await fetch(
+      "https://api.cashfree.com/pg/orders",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "x-client-id": appId,
+          "x-client-secret": secretKey,
+          "x-api-version": "2025-01-01"
+        },
+        body: JSON.stringify({
+          order_id: orderId,
+          order_amount: Number(total.toFixed(2)),
+          order_currency: "INR",
+
+          customer_details: {
+            customer_id: `pockfume_${customerPhone}`,
+            customer_name: customerName,
+            customer_email: customerEmail,
+            customer_phone: customerPhone
+          },
+
+          order_meta: {
+            return_url:
+              "https://pockfume.com/payment-status.html?order_id={order_id}"
+          },
+
+          order_note: orderNote,
+          order_tags: tags
+        })
+      }
+    );
+
+    const data = await cashfreeResponse
+      .json()
+      .catch(() => ({}));
+
+    if (!cashfreeResponse.ok || !data.payment_session_id) {
+      console.error(
+        "Cashfree create-order error:",
+        cashfreeResponse.status,
+        data.type || data.code || "unknown"
+      );
+
       return res.status(502).json({
-        error: "Cashfree did not return a payment session"
+        error:
+          "Cashfree could not create the payment. Please try again."
       });
     }
 
     return res.status(200).json({
-      orderId: result.order_id,
-      paymentSessionId: result.payment_session_id,
-      amount: Number(amount.toFixed(2))
+      orderId: data.order_id,
+      paymentSessionId: data.payment_session_id,
+      amount: total
     });
 
   } catch (error) {
-    console.error("Create order failed:", error.message);
+    console.error(
+      "POCKFUME create-order error:",
+      error && error.message
+        ? error.message
+        : "unknown"
+    );
 
-    return res.status(502).json({
-      error: "Unable to create payment. Please try again."
+    return res.status(500).json({
+      error:
+        "Something went wrong while preparing your payment. Please try again."
     });
   }
 };
