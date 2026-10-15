@@ -1,7 +1,4 @@
-// POCKFUME Admin Orders API
-// File: api/admin/orders.js
-
-const { createClient } = require("@supabase/supabase-js");
+const { sql } = require("@vercel/postgres");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -13,8 +10,7 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // Require an authenticated admin session.
-  // This must be implemented before enabling access.
+  // Do not expose customer data without authentication.
   const adminToken = process.env.ADMIN_API_TOKEN;
 
   if (
@@ -26,48 +22,36 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    return res.status(503).json({
-      error: "Order database is not configured yet"
-    });
-  }
-
   try {
-    const supabase = createClient(
-      supabaseUrl,
-      supabaseKey,
-      {
-        auth: {
-          persistSession: false
-        }
-      }
-    );
-
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-
-    if (error) {
-      console.error("Admin orders query failed:", error.message);
-
-      return res.status(500).json({
-        error: "Unable to load orders"
-      });
-    }
+    const result = await sql`
+      SELECT
+        order_id,
+        created_at,
+        customer_name,
+        customer_phone,
+        customer_email,
+        address,
+        city,
+        state,
+        pincode,
+        product,
+        quantity,
+        amount,
+        payment_status,
+        delivery_status
+      FROM orders
+      ORDER BY created_at DESC
+      LIMIT 500
+    `;
 
     return res.status(200).json({
-      orders: data || []
+      orders: result.rows
     });
   } catch (error) {
-    console.error("Admin orders API failed");
+    console.error("Order query failed");
 
     return res.status(500).json({
-      error: "Internal server error"
+      error: "Unable to load orders"
     });
   }
 };
