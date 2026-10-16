@@ -1,12 +1,8 @@
 {
-  "name": "pockfume-order-management",
+  "name": "pockfume",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": ">=20"
-  },
   "dependencies": {
-    "@vercel/postgres": "^0.10.0",
-    "pg": "^8.13.1"
+    "pg": "^8.16.3"
   }
 }
