@@ -138,13 +138,13 @@
       Return to POCKFUME
     </a>
 
+    <!-- Corrected POCKFUME WhatsApp contact number -->
     <a
       class="button secondary"
       id="whatsappButton"
-      href="https://wa.me/91YOURNUMBER"
+      href="https://wa.me/919663712870"
       target="_blank"
-      rel="noopener"
-    >
+      rel="noopener noreferrer">
       Contact Us on WhatsApp
     </a>
 
@@ -179,6 +179,7 @@
           "Order ID Missing",
           "We could not find your order ID. Please contact us for assistance."
         );
+
         retryButton.classList.add("hidden");
         homeButton.classList.remove("hidden");
         return;
@@ -201,27 +202,36 @@
 
         if (!response.ok) {
           throw new Error(
-            result.message || result.error || "Unable to verify payment."
+            result.message ||
+            result.error ||
+            "Unable to verify payment."
           );
         }
 
-        if (result.paid === true || result.orderStatus === "PAID") {
+        if (
+          result.paid === true ||
+          result.orderStatus === "PAID"
+        ) {
           showStatus(
             "✅",
             "Payment Successful!",
             "Thank you for shopping with POCKFUME. Your payment has been confirmed."
           );
+
           homeButton.textContent = "Continue Shopping";
           homeButton.classList.remove("hidden");
+
         } else {
           showStatus(
             "⌛",
             "Payment Not Confirmed Yet",
             "Your payment may still be processing. If money was deducted, please wait and check again."
           );
+
           retryButton.classList.remove("hidden");
           homeButton.classList.remove("hidden");
         }
+
       } catch (error) {
         showStatus(
           "⚠️",
