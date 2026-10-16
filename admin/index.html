@@ -1,389 +1,47 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>POCKFUME Admin</title>
+const { Pool } = require("pg");
 
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#f5f6fa;color:#202436;font-family:Arial,sans-serif}
-header{background:#111827;color:white;padding:22px}
-header h1{margin:0;letter-spacing:3px}
-header p{color:#cbd5e1;margin-bottom:0}
-.container{max-width:1200px;margin:auto;padding:18px}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
-.card,section{background:white;padding:18px;border-radius:12px;box-shadow:0 2px 10px #00000008}
-.card h3{font-size:13px;color:#64748b;margin-top:0}
-.card h2{margin-bottom:0}
-section{margin-top:18px;overflow-x:auto}
-button{background:#111827;color:white;border:0;border-radius:7px;padding:11px 15px;cursor:pointer}
-button:hover{background:#374151}
-input,select{padding:11px;border:1px solid #d1d5db;border-radius:7px;max-width:100%}
-.actions{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:15px}
-table{width:100%;border-collapse:collapse;min-width:720px}
-th,td{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb;font-size:13px}
-th{background:#f1f5f9}
-.status{font-size:13px;color:#64748b}
-#loginBox{max-width:420px;margin:35px auto;background:white;padding:22px;border-radius:12px}
-#loginBox input{width:100%;margin:8px 0 14px}
-#app{display:none}
-.chart{height:190px;display:flex;align-items:end;gap:12px;padding:15px 0}
-.bar{flex:1;min-width:15px;background:#111827;border-radius:5px 5px 0 0}
-footer{text-align:center;padding:25px;color:#64748b;font-size:12px}
-</style>
-</head>
+module.exports = async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
 
-<body>
-
-<header>
-  <h1>POCKFUME</h1>
-  <p>Private Order Management</p>
-</header>
-
-<div class="container">
-
-  <div id="loginBox">
-    <h2>Admin Access</h2>
-    <p class="status">Enter your ADMIN_API_TOKEN to load orders.</p>
-    <input id="adminToken" type="password"
-           placeholder="Admin token" autocomplete="current-password">
-    <button onclick="login()">Open Dashboard</button>
-    <p id="loginMessage" class="status"></p>
-  </div>
-
-  <div id="app">
-
-    <div class="actions">
-      <button onclick="loadOrders()">Refresh Orders</button>
-      <button onclick="exportOrders()">Export to Excel</button>
-      <button onclick="logout()">Log Out</button>
-    </div>
-
-    <p id="message" class="status">Loading orders...</p>
-
-    <div class="card-grid">
-      <div class="card">
-        <h3>Total Orders</h3>
-        <h2 id="totalOrders">0</h2>
-      </div>
-      <div class="card">
-        <h3>Paid Orders</h3>
-        <h2 id="paidOrders">0</h2>
-      </div>
-      <div class="card">
-        <h3>Total Sales</h3>
-        <h2 id="totalSales">₹0</h2>
-      </div>
-      <div class="card">
-        <h3>Pending Dispatch</h3>
-        <h2 id="pendingDispatch">0</h2>
-      </div>
-    </div>
-
-    <section>
-      <h2>All Orders</h2>
-      <input id="search" placeholder="Search customer, phone or product"
-             oninput="renderOrders()" style="width:100%;max-width:400px">
-
-      <table>
-        <thead>
-          <tr>
-            <th>Order ID</th>
-            <th>Date</th>
-            <th>Customer</th>
-            <th>Mobile</th>
-            <th>Address</th>
-            <th>Product / Combo</th>
-            <th>Qty</th>
-            <th>Amount</th>
-            <th>Payment</th>
-            <th>Delivery</th>
-          </tr>
-        </thead>
-        <tbody id="ordersTable"></tbody>
-      </table>
-    </section>
-
-    <section>
-      <h2>Sales Analytics</h2>
-      <p class="status">Daily revenue from orders marked PAID</p>
-      <div id="salesChart" class="chart"></div>
-      <div id="chartLabels" class="status"></div>
-    </section>
-
-    <section>
-      <h2>Product-wise Sales Report</h2>
-      <table>
-        <thead>
-          <tr><th>Product / Combo</th><th>Units</th><th>Sales</th></tr>
-        </thead>
-        <tbody id="productTable"></tbody>
-      </table>
-    </section>
-
-    <section>
-      <h2>Customer Order History</h2>
-      <table>
-        <thead>
-          <tr><th>Customer</th><th>Mobile</th><th>Orders</th><th>Total Spent</th></tr>
-        </thead>
-        <tbody id="customerTable"></tbody>
-      </table>
-    </section>
-
-  </div>
-</div>
-
-<footer>POCKFUME Admin Dashboard</footer>
-
-<script>
-let orders = [];
-let adminToken = "";
-
-const money = n => "₹" + Number(n || 0).toLocaleString("en-IN");
-
-function safe(value) {
-  return String(value ?? "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;", "<":"&lt;", ">":"&gt;",
-    '"':"&quot;", "'":"&#39;"
-  })[c]);
-}
-
-function paid(order) {
-  return String(order.payment_status || "").toUpperCase() === "PAID";
-}
-
-function dateText(value) {
-  if (!value) return "-";
-  const d = new Date(value);
-  return isNaN(d) ? "-" : d.toLocaleDateString("en-IN");
-}
-
-async function login() {
-  adminToken = document.getElementById("adminToken").value.trim();
-
-  if (!adminToken) {
-    document.getElementById("loginMessage").textContent =
-      "Enter your admin token.";
-    return;
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  await loadOrders();
-}
+  const token = process.env.ADMIN_API_TOKEN;
 
-async function loadOrders() {
-  const message = document.getElementById("message");
-  message.textContent = "Loading orders...";
+  if (!token || req.headers.authorization !== `Bearer ${token}`) {
+    return res.status(401).json({ error: "Admin authentication failed" });
+  }
+
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.STORAGE_URL ||
+    process.env.POSTGRES_URL;
+
+  if (!connectionString) {
+    return res.status(500).json({
+      error: "Database connection variable is missing"
+    });
+  }
+
+  const pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false }
+  });
 
   try {
-    const response = await fetch("/api/admin/orders", {
-      method: "GET",
-      headers: { "Authorization": "Bearer " + adminToken },
-      cache: "no-store"
-    });
+    const result = await pool.query(
+      "SELECT * FROM orders ORDER BY created_at DESC LIMIT 500"
+    );
 
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data.error || "Unable to load orders.");
-    }
-
-    if (!Array.isArray(data.orders)) {
-      throw new Error("Unexpected order data.");
-    }
-
-    orders = data.orders;
-    document.getElementById("loginBox").style.display = "none";
-    document.getElementById("app").style.display = "block";
-    document.getElementById("adminToken").value = "";
-
-    message.textContent = orders.length + " orders loaded.";
-    renderAll();
-
+    return res.status(200).json({ orders: result.rows });
   } catch (error) {
-    document.getElementById("loginMessage").textContent = error.message;
-    document.getElementById("message").textContent = error.message;
-    document.getElementById("app").style.display = "none";
-    document.getElementById("loginBox").style.display = "block";
+    console.error("Database query failed:", error.message);
+
+    return res.status(500).json({
+      error: "Database query failed. Check the database configuration and orders table."
+    });
+  } finally {
+    await pool.end();
   }
-}
-
-function logout() {
-  adminToken = "";
-  orders = [];
-  document.getElementById("app").style.display = "none";
-  document.getElementById("loginBox").style.display = "block";
-  document.getElementById("adminToken").value = "";
-  document.getElementById("loginMessage").textContent = "";
-}
-
-function renderAll() {
-  renderSummary();
-  renderOrders();
-  renderProducts();
-  renderCustomers();
-  renderChart();
-}
-
-function renderSummary() {
-  const paidOrders = orders.filter(paid);
-  const revenue = paidOrders.reduce((s, o) => s + Number(o.amount || 0), 0);
-
-  const pending = paidOrders.filter(o =>
-    !["SHIPPED", "DELIVERED"].includes(
-      String(o.delivery_status || "").toUpperCase()
-    )
-  );
-
-  document.getElementById("totalOrders").textContent = orders.length;
-  document.getElementById("paidOrders").textContent = paidOrders.length;
-  document.getElementById("totalSales").textContent = money(revenue);
-  document.getElementById("pendingDispatch").textContent = pending.length;
-}
-
-function renderOrders() {
-  const query = document.getElementById("search").value.toLowerCase();
-
-  const filtered = orders.filter(o =>
-    JSON.stringify(o).toLowerCase().includes(query)
-  );
-
-  document.getElementById("ordersTable").innerHTML =
-    filtered.map(o => `
-      <tr>
-        <td>${safe(o.order_id)}</td>
-        <td>${safe(dateText(o.created_at))}</td>
-        <td>${safe(o.customer_name)}</td>
-        <td>${safe(o.customer_phone)}</td>
-        <td>${safe([o.address, o.city, o.state, o.pincode].filter(Boolean).join(", "))}</td>
-        <td>${safe(o.product)}</td>
-        <td>${safe(o.quantity)}</td>
-        <td>${money(o.amount)}</td>
-        <td>${safe(o.payment_status)}</td>
-        <td>${safe(o.delivery_status)}</td>
-      </tr>
-    `).join("") ||
-    '<tr><td colspan="10">No orders found.</td></tr>';
-}
-
-function renderProducts() {
-  const products = {};
-
-  orders.filter(paid).forEach(o => {
-    const name = o.product || "Unknown";
-    if (!products[name]) products[name] = { qty: 0, sales: 0 };
-    products[name].qty += Number(o.quantity || 0);
-    products[name].sales += Number(o.amount || 0);
-  });
-
-  document.getElementById("productTable").innerHTML =
-    Object.entries(products).map(([name, p]) => `
-      <tr><td>${safe(name)}</td><td>${p.qty}</td><td>${money(p.sales)}</td></tr>
-    `).join("") ||
-    '<tr><td colspan="3">No paid sales yet.</td></tr>';
-}
-
-function renderCustomers() {
-  const customers = {};
-
-  orders.filter(paid).forEach(o => {
-    const phone = o.customer_phone || "Unknown";
-    if (!customers[phone]) {
-      customers[phone] = {
-        name: o.customer_name || "Unknown",
-        count: 0,
-        spent: 0
-      };
-    }
-    customers[phone].count++;
-    customers[phone].spent += Number(o.amount || 0);
-  });
-
-  document.getElementById("customerTable").innerHTML =
-    Object.entries(customers).map(([phone, c]) => `
-      <tr>
-        <td>${safe(c.name)}</td>
-        <td>${safe(phone)}</td>
-        <td>${c.count}</td>
-        <td>${money(c.spent)}</td>
-      </tr>
-    `).join("") ||
-    '<tr><td colspan="4">No customer history yet.</td></tr>';
-}
-
-function renderChart() {
-  const daily = {};
-
-  orders.filter(paid).forEach(o => {
-    if (!o.created_at) return;
-    const date = dateText(o.created_at);
-    daily[date] = (daily[date] || 0) + Number(o.amount || 0);
-  });
-
-  const entries = Object.entries(daily).slice(-7);
-  const chart = document.getElementById("salesChart");
-
-  if (!entries.length) {
-    chart.innerHTML = "<p>No paid sales yet.</p>";
-    document.getElementById("chartLabels").textContent = "";
-    return;
-  }
-
-  const max = Math.max(...entries.map(e => e[1]), 1);
-
-  chart.innerHTML = entries.map(([date, amount]) => `
-    <div class="bar"
-      title="${safe(date)}: ${money(amount)}"
-      style="height:${Math.max(4, amount / max * 100)}%">
-    </div>
-  `).join("");
-
-  document.getElementById("chartLabels").textContent =
-    entries.map(e => e[0]).join(" | ");
-}
-
-function exportOrders() {
-  if (!orders.length) {
-    alert("There are no orders to export.");
-    return;
-  }
-
-  const headings = [
-    "Order ID", "Date", "Customer", "Mobile", "Email",
-    "Address", "City", "State", "PIN Code", "Product",
-    "Quantity", "Amount", "Payment Status", "Delivery Status"
-  ];
-
-  const rows = orders.map(o => [
-    o.order_id, o.created_at, o.customer_name, o.customer_phone,
-    o.customer_email, o.address, o.city, o.state, o.pincode,
-    o.product, o.quantity, o.amount, o.payment_status, o.delivery_status
-  ]);
-
-  function cell(v) {
-    let s = String(v ?? "");
-    if (/^[\s]*[=+\-@]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-
-  const csv = [headings, ...rows]
-    .map(row => row.map(cell).join(","))
-    .join("\r\n");
-
-  const blob = new Blob(["\uFEFF" + csv], {
-    type: "text/csv;charset=utf-8;"
-  });
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "POCKFUME_Orders.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-</script>
-
-</body>
-</html>
+};
