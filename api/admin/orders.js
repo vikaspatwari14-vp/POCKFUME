@@ -1,18 +1,5 @@
 const { Pool } = require("pg");
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  process.env.STORAGE_URL ||
-  process.env.POSTGRES_URL;
-
-const pool = connectionString
-  ? new Pool({
-      connectionString,
-      ssl: { rejectUnauthorized: false },
-      max: 3
-    })
-  : null;
-
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
@@ -27,15 +14,25 @@ module.exports = async function handler(req, res) {
 
   if (!token || req.headers.authorization !== `Bearer ${token}`) {
     return res.status(401).json({
-      error: "Admin authentication required"
+      error: "Admin authentication failed"
     });
   }
 
-  if (!pool) {
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.STORAGE_URL ||
+    process.env.POSTGRES_URL;
+
+  if (!connectionString) {
     return res.status(500).json({
-      error: "Database connection is not configured"
+      error: "Database connection variable is missing"
     });
   }
+
+  const pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false }
+  });
 
   try {
     const result = await pool.query(`
@@ -63,10 +60,12 @@ module.exports = async function handler(req, res) {
       orders: result.rows
     });
   } catch (error) {
-    console.error("POCKFUME orders query failed:", error.message);
+    console.error("Admin order query failed:", error.message);
 
     return res.status(500).json({
-      error: "Unable to load orders. Check database configuration and table."
+      error: "Unable to load orders. Check the database table and columns."
     });
+  } finally {
+    await pool.end();
   }
 };
