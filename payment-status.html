@@ -6,6 +6,8 @@
 
   <title>Payment Status | POCKFUME</title>
 
+  <meta name="robots" content="noindex, nofollow">
+
   <style>
     * {
       box-sizing: border-box;
@@ -88,13 +90,18 @@
       cursor: pointer;
     }
 
+    .button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
     .secondary {
       background: #eee;
       color: #222;
     }
 
     .hidden {
-      display: none;
+      display: none !important;
     }
 
     .note {
@@ -102,20 +109,32 @@
       font-size: 12px;
       color: #888;
     }
+
+    .success {
+      background: #e3f5e8;
+    }
+
+    .pending {
+      background: #fff0d4;
+    }
+
+    .error {
+      background: #ffebeb;
+    }
   </style>
 </head>
 
 <body>
 
-  <div class="card">
+  <main class="card">
     <div class="brand">POCKFUME</div>
     <p>Small size. Lasting impression.</p>
 
-    <div class="icon" id="statusIcon">⏳</div>
+    <div class="icon" id="statusIcon" aria-hidden="true">⏳</div>
 
     <h1 id="statusTitle">Checking your payment...</h1>
 
-    <p id="statusMessage">
+    <p id="statusMessage" aria-live="polite">
       Please wait while we confirm your payment securely.
     </p>
 
@@ -127,7 +146,7 @@
     <button
       class="button hidden"
       id="retryButton"
-      onclick="checkPayment()">
+      type="button">
       Check Payment Again
     </button>
 
@@ -138,7 +157,6 @@
       Return to POCKFUME
     </a>
 
-    <!-- Corrected POCKFUME WhatsApp contact number -->
     <a
       class="button secondary"
       id="whatsappButton"
@@ -151,9 +169,11 @@
     <div class="note">
       Please keep your order ID for future reference.
     </div>
-  </div>
+  </main>
 
   <script>
+    "use strict";
+
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get("order_id");
 
@@ -164,85 +184,205 @@
     const retryButton = document.getElementById("retryButton");
     const homeButton = document.getElementById("homeButton");
 
+    let checking = false;
+    let paymentConfirmed = false;
+    let retryCount = 0;
+    let retryTimer = null;
+
+    const MAX_AUTO_RETRIES = 5;
+    const RETRY_DELAY = 5000;
+
     orderElement.textContent = orderId || "Not available";
 
-    function showStatus(symbol, heading, description) {
+    function showStatus(symbol, heading, description, className) {
       icon.textContent = symbol;
       title.textContent = heading;
       message.textContent = description;
+
+      icon.className = "icon";
+
+      if (className) {
+        icon.classList.add(className);
+      }
     }
 
-    async function checkPayment() {
-      if (!orderId) {
-        showStatus(
-          "⚠️",
-          "Order ID Missing",
-          "We could not find your order ID. Please contact us for assistance."
-        );
+    function showHomeButton() {
+      homeButton.classList.remove("hidden");
+    }
 
-        retryButton.classList.add("hidden");
-        homeButton.classList.remove("hidden");
+    function stopAutomaticRetries() {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    }
+
+    function scheduleRetry() {
+      stopAutomaticRetries();
+
+      if (
+        paymentConfirmed ||
+        retryCount >= MAX_AUTO_RETRIES
+      ) {
+        retryButton.classList.remove("hidden");
+        retryButton.disabled = false;
+        retryButton.textContent = "Check Payment Again";
+        showHomeButton();
         return;
       }
 
-      retryButton.classList.add("hidden");
+      retryCount++;
+
+      retryButton.classList.remove("hidden");
+      retryButton.disabled = true;
+      retryButton.textContent =
+        "Checking again in " + (RETRY_DELAY / 1000) + " seconds...";
+
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        checkPayment(true);
+      }, RETRY_DELAY);
+    }
+
+    async function checkPayment(isAutomatic = false) {
+      if (checking || paymentConfirmed) {
+        return;
+      }
+
+      if (!orderId) {
+        stopAutomaticRetries();
+
+        showStatus(
+          "⚠️",
+          "Order ID Missing",
+          "We could not find your order ID. Please contact us for assistance.",
+          "error"
+        );
+
+        retryButton.classList.add("hidden");
+        showHomeButton();
+        return;
+      }
+
+      checking = true;
+      retryButton.disabled = true;
+      retryButton.classList.remove("hidden");
+      retryButton.textContent = "Verifying Payment...";
+
+      if (!isAutomatic) {
+        retryCount = 0;
+      }
 
       showStatus(
         "⏳",
         "Checking Your Payment",
-        "Please wait while we verify your order with Cashfree."
+        "Please wait while we verify your order securely with Cashfree."
       );
 
       try {
         const response = await fetch(
-          "/api/verify-order?order_id=" + encodeURIComponent(orderId)
+          "/api/verify-order?order_id=" +
+            encodeURIComponent(orderId),
+          {
+            method: "GET",
+            cache: "no-store",
+            headers: {
+              "Accept": "application/json"
+            }
+          }
         );
 
-        const result = await response.json();
+        let result;
+
+        try {
+          result = await response.json();
+        } catch {
+          throw new Error("Invalid verification response.");
+        }
 
         if (!response.ok) {
           throw new Error(
-            result.message ||
             result.error ||
+            result.message ||
             "Unable to verify payment."
           );
         }
 
-        if (
-          result.paid === true ||
-          result.orderStatus === "PAID"
-        ) {
+        const status = String(
+          result.orderStatus || ""
+        ).toUpperCase();
+
+        if (result.paid === true && status === "PAID") {
+          paymentConfirmed = true;
+          stopAutomaticRetries();
+
           showStatus(
             "✅",
             "Payment Successful!",
-            "Thank you for shopping with POCKFUME. Your payment has been confirmed."
+            "Thank you for shopping with POCKFUME. Your payment has been confirmed.",
+            "success"
           );
 
+          retryButton.classList.add("hidden");
+          showHomeButton();
           homeButton.textContent = "Continue Shopping";
-          homeButton.classList.remove("hidden");
-
-        } else {
-          showStatus(
-            "⌛",
-            "Payment Not Confirmed Yet",
-            "Your payment may still be processing. If money was deducted, please wait and check again."
-          );
-
-          retryButton.classList.remove("hidden");
-          homeButton.classList.remove("hidden");
+          return;
         }
 
+        if (
+          status === "EXPIRED" ||
+          status === "TERMINATED"
+        ) {
+          stopAutomaticRetries();
+
+          showStatus(
+            "⚠️",
+            "Payment Session Expired",
+            "This payment session has expired. If money was deducted, please contact us before placing another order.",
+            "error"
+          );
+
+          retryButton.classList.add("hidden");
+          showHomeButton();
+          return;
+        }
+
+        showStatus(
+          "⌛",
+          "Payment Not Confirmed Yet",
+          "Your payment may still be processing. If money was deducted, please wait while we check again.",
+          "pending"
+        );
+
+        scheduleRetry();
+
       } catch (error) {
+        console.error("Payment verification error:", error);
+
         showStatus(
           "⚠️",
           "Unable to Confirm Payment",
-          "We could not verify your payment right now. Please try again shortly."
+          "We could not verify your payment right now. If money was deducted, please do not pay again immediately. Try checking again shortly.",
+          "error"
         );
 
-        retryButton.classList.remove("hidden");
-        homeButton.classList.remove("hidden");
+        scheduleRetry();
+
+      } finally {
+        checking = false;
+
+        if (!paymentConfirmed && !retryTimer) {
+          retryButton.disabled = false;
+          retryButton.textContent = "Check Payment Again";
+        }
       }
     }
+
+    retryButton.addEventListener("click", () => {
+      stopAutomaticRetries();
+      retryCount = 0;
+      checkPayment(false);
+    });
 
     checkPayment();
   </script>
