@@ -1,5 +1,6 @@
 // POCKFUME — Cashfree + Neon Order Creation
 // Supports individual products and all 3 combo offers.
+// Signature Duo is a fixed combo: no fragrance selection required.
 
 const { Pool } = require("pg");
 
@@ -20,44 +21,51 @@ const PRODUCTS = {
   "British Tea Rose": 249
 };
 
-// All combo offers
+// Combo offers
 const COMBOS = {
-  "Couple Combo": {
+  "Signature Duo": {
     price: 399,
-    count: 2,
-    allowSameFragrance: false
+    count: 0,
+    allowSameFragrance: true,
+    fixed: true,
+    description: "For Her + For Him"
   },
 
   "Pick Any 2 Combo": {
     price: 349,
     count: 2,
-    allowSameFragrance: false
+    allowSameFragrance: false,
+    fixed: false
   },
 
   "Pick Any 4 Combo": {
     price: 599,
     count: 4,
-    allowSameFragrance: false
+    allowSameFragrance: false,
+    fixed: false
   }
 };
 
-// Clean customer-supplied text.
+// Sanitize customer-supplied text
 const clean = (value, max = 150) =>
   String(value || "")
     .trim()
     .replace(/[<>\u0000-\u001F]/g, "")
     .slice(0, max);
 
-// Normalize possible product names used by the website.
+// Normalize product names sent by the website
 const normalizeProductName = (name) => {
   const value = clean(name, 60);
 
   const aliases = {
+    "Couple Combo": "Signature Duo",
+    "For Her + For Him": "Signature Duo",
+    "For Her + For Him Combo": "Signature Duo",
+    "Her + Him Combo": "Signature Duo",
+    "Signature Duo Combo": "Signature Duo",
+
     "Pick Any 2": "Pick Any 2 Combo",
-    "Pick Any 4": "Pick Any 4 Combo",
-    "For Her + For Him": "Couple Combo",
-    "For Her + For Him Combo": "Couple Combo",
-    "Her + Him Combo": "Couple Combo"
+    "Pick Any 4": "Pick Any 4 Combo"
   };
 
   return aliases[value] || value;
@@ -175,9 +183,7 @@ module.exports = async function handler(req, res) {
       if (PRODUCTS[product] !== undefined) {
         total += PRODUCTS[product] * qty;
 
-        descriptions.push(
-          `${product} x${qty}`
-        );
+        descriptions.push(`${product} x${qty}`);
 
         continue;
       }
@@ -186,21 +192,29 @@ module.exports = async function handler(req, res) {
       // COMBO PRODUCT
       // ----------------------------------------
 
-      if (COMBOS[product]) {
-        const combo = COMBOS[product];
+      const combo = COMBOS[product];
 
+      if (combo) {
+        // Signature Duo is fixed.
+        // It does not require fragrance choices.
+        if (combo.fixed) {
+          total += combo.price * qty;
+
+          descriptions.push(
+            `${product} (${combo.description}) x${qty}`
+          );
+
+          continue;
+        }
+
+        // Pick Any combos require fragrance choices.
         const choices = Array.isArray(item.choices)
-          ? item.choices.map((choice) =>
-              clean(choice, 60)
-            )
+          ? item.choices.map(choice => clean(choice, 60))
           : [];
 
-        // Require the correct number of valid fragrances.
         if (
           choices.length !== combo.count ||
-          choices.some(
-            (choice) => PRODUCTS[choice] === undefined
-          )
+          choices.some(choice => PRODUCTS[choice] === undefined)
         ) {
           return res.status(400).json({
             error:
@@ -208,7 +222,6 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Prevent selecting the same fragrance multiple times.
         if (
           !combo.allowSameFragrance &&
           new Set(choices).size !== combo.count
@@ -219,7 +232,6 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Price is determined on the server.
         total += combo.price * qty;
 
         descriptions.push(
@@ -229,16 +241,12 @@ module.exports = async function handler(req, res) {
         continue;
       }
 
-      // Unknown product: reject the order.
       return res.status(400).json({
         error: `Invalid product in your cart: ${product}`
       });
     }
 
-    if (
-      total <= 0 ||
-      total > 100000
-    ) {
+    if (total <= 0 || total > 100000) {
       return res.status(400).json({
         error: "Invalid order total."
       });
@@ -254,16 +262,13 @@ module.exports = async function handler(req, res) {
       "_" +
       Math.random().toString(36).slice(2, 8);
 
-    const productText =
-      descriptions.join("; ").slice(0, 250);
+    const productText = descriptions.join("; ").slice(0, 250);
 
     const fullAddress = [
       line1,
       line2,
       landmark
-    ]
-      .filter(Boolean)
-      .join(", ");
+    ].filter(Boolean).join(", ");
 
     // ------------------------------------------
     // 4. CREATE CASHFREE PAYMENT ORDER
@@ -273,7 +278,6 @@ module.exports = async function handler(req, res) {
       "https://api.cashfree.com/pg/orders",
       {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
@@ -284,11 +288,7 @@ module.exports = async function handler(req, res) {
 
         body: JSON.stringify({
           order_id: orderId,
-
-          order_amount: Number(
-            total.toFixed(2)
-          ),
-
+          order_amount: Number(total.toFixed(2)),
           order_currency: "INR",
 
           customer_details: {
@@ -324,8 +324,7 @@ module.exports = async function handler(req, res) {
       );
 
       return res.status(502).json({
-        error:
-          "Unable to create payment. Please try again."
+        error: "Unable to create payment. Please try again."
       });
     }
 
@@ -369,14 +368,13 @@ module.exports = async function handler(req, res) {
     );
 
     // ------------------------------------------
-    // 6. RETURN PAYMENT SESSION TO WEBSITE
+    // 6. RETURN CASHFREE PAYMENT SESSION
     // ------------------------------------------
 
     return res.status(200).json({
       success: true,
       orderId,
-      paymentSessionId:
-        payment.payment_session_id,
+      paymentSessionId: payment.payment_session_id,
       amount: total,
       currency: "INR"
     });
@@ -388,8 +386,7 @@ module.exports = async function handler(req, res) {
     );
 
     return res.status(500).json({
-      error:
-        "Unable to prepare your order. Please try again."
+      error: "Unable to prepare your order. Please try again."
     });
   }
 };
