@@ -1,7 +1,21 @@
-// POCKFUME Cashfree LIVE order creation
-// Address is saved with the Cashfree order using order_tags.
 
-const PRODUCT_PRICES = {
+// POCKFUME — Cashfree + PostgreSQL Order Creation
+// File location: api/create-order.js
+
+const { Pool } = require("pg");
+
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  process.env.STORAGE_URL ||
+  process.env.POSTGRES_URL;
+
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: { rejectUnauthorized: false }
+});
+
+// Individual perfume prices
+const PRODUCTS = {
   "Night Volt": 249,
   "Velvet Ember": 249,
   "Golden Haze": 249,
@@ -9,20 +23,46 @@ const PRODUCT_PRICES = {
   "British Tea Rose": 249
 };
 
-const COMBO_PRICES = {
-  "Pick Any 2 Combo": { price: 399, count: 2 },
-  "Pick Any 4 Combo": { price: 599, count: 4 }
+// Combo prices
+const COMBOS = {
+  "Signature Duo": {
+    price: 399,
+    fixed: true,
+    description: "For Her + For Him"
+  },
+  "Pick Any 2 Combo": {
+    price: 399,
+    count: 2
+  },
+  "Pick Any 4 Combo": {
+    price: 599,
+    count: 4
+  }
 };
 
-function clean(value, maxLength = 100) {
-  return String(value || "")
+const clean = (value, max = 150) =>
+  String(value || "")
     .trim()
     .replace(/[<>\u0000-\u001F]/g, "")
-    .slice(0, maxLength);
+    .slice(0, max);
+
+function normalizeProductName(name) {
+  const value = clean(name, 60);
+
+  const aliases = {
+    "Pick Any 2": "Pick Any 2 Combo",
+    "Pick Any 4": "Pick Any 4 Combo",
+    "Couple Combo": "Signature Duo",
+    "For Her + For Him": "Signature Duo",
+    "For Her + For Him Combo": "Signature Duo",
+    "For Her + For Him Couple Combo": "Signature Duo",
+    "Her + Him Combo": "Signature Duo"
+  };
+
+  return aliases[value] || value;
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader("Content-Type", "application/json");
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method !== "POST") {
@@ -33,11 +73,11 @@ module.exports = async function handler(req, res) {
   }
 
   const appId = process.env.CASHFREE_APP_ID;
-  const secretKey = process.env.CASHFREE_SECRET_KEY;
+  const secret = process.env.CASHFREE_SECRET_KEY;
 
-  if (!appId || !secretKey) {
+  if (!appId || !secret || !databaseUrl) {
     return res.status(500).json({
-      error: "Payment service is not configured. Please try again later."
+      error: "Payment or database configuration is missing."
     });
   }
 
@@ -45,58 +85,62 @@ module.exports = async function handler(req, res) {
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body)
-        : (req.body || {});
+        : req.body || {};
 
-    const customerName = clean(body.customerName, 100);
-    const customerEmail = clean(body.customerEmail, 150);
-    const customerPhone = clean(body.customerPhone, 10);
+    // Customer details
+    const name = clean(body.customerName);
+    const email = clean(body.customerEmail);
+    const phone = clean(body.customerPhone, 10);
+
     const address = body.address || {};
 
-    const address1 = clean(address.line1, 100);
-    const address2 = clean(address.line2, 100);
-    const landmark = clean(address.landmark, 80);
-    const city = clean(address.city, 60);
-    const state = clean(address.state, 60);
+    const line1 = clean(address.line1);
+    const line2 = clean(address.line2);
+    const landmark = clean(address.landmark);
+    const city = clean(address.city);
+    const state = clean(address.state);
     const pincode = clean(address.pincode, 6);
 
+    // Validate customer details
     if (
-      !customerName ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) ||
-      !/^[6-9]\d{9}$/.test(customerPhone)
+      !name ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+      !/^[6-9]\d{9}$/.test(phone)
     ) {
       return res.status(400).json({
-        error:
-          "Please enter a valid name, email and 10-digit Indian mobile number."
+        error: "Enter a valid name, email and mobile number."
       });
     }
 
     if (
-      !address1 ||
-      !address2 ||
+      !line1 ||
+      !line2 ||
       !city ||
       !state ||
       !/^\d{6}$/.test(pincode)
     ) {
       return res.status(400).json({
-        error:
-          "Please enter your complete delivery address and a valid 6-digit PIN code."
+        error: "Enter your complete delivery address and PIN code."
       });
     }
 
-    const items = Array.isArray(body.items) ? body.items : [];
-
-    if (!items.length || items.length > 20) {
+    // Validate cart
+    if (
+      !Array.isArray(body.items) ||
+      body.items.length < 1 ||
+      body.items.length > 20
+    ) {
       return res.status(400).json({
-        error: "Your cart is empty or contains too many items."
+        error: "Your cart is empty or invalid."
       });
     }
 
     let total = 0;
-    const orderLines = [];
-    const choicesForTags = [];
+    let totalQty = 0;
+    const descriptions = [];
 
-    for (const item of items) {
-      const name = clean(item.name, 60);
+    for (const item of body.items) {
+      const product = normalizeProductName(item.name);
       const qty = Number(item.qty);
 
       if (!Number.isInteger(qty) || qty < 1 || qty > 99) {
@@ -105,87 +149,88 @@ module.exports = async function handler(req, res) {
         });
       }
 
-      // Individual fragrances
-      if (Object.prototype.hasOwnProperty.call(PRODUCT_PRICES, name)) {
-        total += PRODUCT_PRICES[name] * qty;
-        orderLines.push(`${name} x${qty}`);
+      totalQty += qty;
+
+      // Individual perfume
+      if (PRODUCTS[product] !== undefined) {
+        total += PRODUCTS[product] * qty;
+        descriptions.push(`${product} x${qty}`);
         continue;
       }
 
       // Combo products
-      if (Object.prototype.hasOwnProperty.call(COMBO_PRICES, name)) {
-        const combo = COMBO_PRICES[name];
+      if (COMBOS[product]) {
+        const combo = COMBOS[product];
 
+        // Signature Duo is a fixed combo
+        if (combo.fixed) {
+          total += combo.price * qty;
+          descriptions.push(
+            `${product} (${combo.description}) x${qty}`
+          );
+          continue;
+        }
+
+        // Validate selected fragrances for Pick Any combos
         const choices = Array.isArray(item.choices)
-          ? item.choices.map(x => clean(x, 60))
+          ? item.choices.map(choice => clean(choice, 60))
           : [];
 
-        const uniqueChoices = [...new Set(choices)];
-
         if (
-          uniqueChoices.length !== combo.count ||
-          uniqueChoices.some(
-            x => !Object.prototype.hasOwnProperty.call(PRODUCT_PRICES, x)
-          )
+          choices.length !== combo.count ||
+          choices.some(choice => PRODUCTS[choice] === undefined)
         ) {
           return res.status(400).json({
-            error: `Please choose exactly ${combo.count} different fragrances for ${name}.`
+            error: `Choose ${combo.count} valid fragrances for ${product}.`
           });
         }
 
-        // Pick Any 2 = ₹399
-        // Pick Any 4 = ₹599
+        if (new Set(choices).size !== combo.count) {
+          return res.status(400).json({
+            error: `Choose ${combo.count} different fragrances for ${product}.`
+          });
+        }
+
         total += combo.price * qty;
-
-        orderLines.push(
-          `${name} (${uniqueChoices.join(", ")}) x${qty}`
+        descriptions.push(
+          `${product} (${choices.join(", ")}) x${qty}`
         );
-
-        choicesForTags.push(
-          `${name}: ${uniqueChoices.join(", ")}`
-        );
-
         continue;
       }
 
       return res.status(400).json({
-        error: `We could not validate the product "${name}". Please refresh your cart and try again.`
+        error: `Invalid product in your cart: ${product}`
       });
     }
 
-    if (!Number.isFinite(total) || total < 1 || total > 100000) {
+    if (total <= 0 || total > 100000) {
       return res.status(400).json({
         error: "Invalid order total."
       });
     }
 
+    // Generate unique order ID
     const orderId =
-      `pockfume_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      "pockfume_" +
+      Date.now() +
+      "_" +
+      Math.random().toString(36).slice(2, 8);
 
-    const orderNote = orderLines.join("; ").slice(0, 240);
+    const productText = descriptions.join("; ").slice(0, 250);
+    const fullAddress = [line1, line2, landmark]
+      .filter(Boolean)
+      .join(", ");
 
-    const tags = {
-      addr1: address1,
-      addr2: address2,
-      landmark: landmark || "Not provided",
-      city: city,
-      state: state,
-      pincode: pincode,
-      items: [...orderLines, ...choicesForTags]
-        .join("; ")
-        .slice(0, 250)
-    };
-
-    // Create order with Cashfree
-    const cashfreeResponse = await fetch(
+    // Create Cashfree payment order
+    const paymentResponse = await fetch(
       "https://api.cashfree.com/pg/orders",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
+          Accept: "application/json",
           "x-client-id": appId,
-          "x-client-secret": secretKey,
+          "x-client-secret": secret,
           "x-api-version": "2025-01-01"
         },
         body: JSON.stringify({
@@ -194,10 +239,10 @@ module.exports = async function handler(req, res) {
           order_currency: "INR",
 
           customer_details: {
-            customer_id: `pockfume_${customerPhone}`,
-            customer_name: customerName,
-            customer_email: customerEmail,
-            customer_phone: customerPhone
+            customer_id: "pf_" + phone,
+            customer_name: name,
+            customer_email: email,
+            customer_phone: phone
           },
 
           order_meta: {
@@ -205,41 +250,84 @@ module.exports = async function handler(req, res) {
               "https://pockfume.com/payment-status.html?order_id={order_id}"
           },
 
-          order_note: orderNote,
-          order_tags: tags
+          order_note: productText
         })
       }
     );
 
-    const data = await cashfreeResponse.json().catch(() => ({}));
+    const payment = await paymentResponse
+      .json()
+      .catch(() => ({}));
 
-    if (!cashfreeResponse.ok || !data.payment_session_id) {
+    if (
+      !paymentResponse.ok ||
+      !payment.payment_session_id
+    ) {
       console.error(
-        "Cashfree create-order error:",
-        cashfreeResponse.status,
-        data.type || data.code || "unknown"
+        "Cashfree order creation failed:",
+        paymentResponse.status,
+        payment.type || "",
+        payment.code || ""
       );
 
       return res.status(502).json({
-        error: "Cashfree could not create the payment. Please try again."
+        error: "Unable to create payment. Please try again."
       });
     }
 
+    // Save order in PostgreSQL
+    await pool.query(
+      `INSERT INTO orders (
+        order_id,
+        customer_name,
+        customer_phone,
+        customer_email,
+        address,
+        city,
+        state,
+        pincode,
+        product,
+        quantity,
+        amount,
+        payment_status,
+        delivery_status
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        'PENDING', 'PROCESSING'
+      )`,
+      [
+        orderId,
+        name,
+        phone,
+        email,
+        fullAddress,
+        city,
+        state,
+        pincode,
+        productText,
+        totalQty,
+        total
+      ]
+    );
+
+    // Send payment session to website
     return res.status(200).json({
-      orderId: data.order_id,
-      paymentSessionId: data.payment_session_id,
-      amount: total
+      success: true,
+      orderId,
+      paymentSessionId: payment.payment_session_id,
+      amount: total,
+      currency: "INR"
     });
 
   } catch (error) {
     console.error(
-      "POCKFUME create-order error:",
-      error && error.message ? error.message : "unknown"
+      "POCKFUME order creation error:",
+      error.message
     );
 
     return res.status(500).json({
-      error:
-        "Something went wrong while preparing your payment. Please try again."
+      error: "Unable to prepare your order. Please try again."
     });
   }
 };
